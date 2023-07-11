@@ -14,9 +14,15 @@
       </div>
 
       <section>
-        <form action="">
-          <label for="1"><button>Choose file</button></label>
-          <input type="file" name="arquivo" id="1" />
+        <span id="filename">No file chosen.</span>
+        <form action="" id="file-form">
+          <label for="1">Choose file</label>
+          <input
+            type="file"
+            name="arquivo"
+            id="1"
+            onchange="handleUploadedFileName()"
+          />
           <button type="submit">Send file</button>
         </form>
       </section>
