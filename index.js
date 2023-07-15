@@ -9,7 +9,9 @@ const port = 3001;
 
 // Configuring mongoose
 const mongoose = require("mongoose");
-mongoose.connect(process.env.DATABASE_URL);
+mongoose.connect(
+  "mongodb+srv://kadson:a7x@cluster0.mmdhgv2.mongodb.net/?retryWrites=true&w=majority"
+);
 const db = mongoose.connection;
 
 // Setting mongoose up for errors and initial start
