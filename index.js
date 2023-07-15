@@ -1,28 +1,13 @@
-// Configuring dotenv library
-require("dotenv").config();
-
-// Configuring express
 const express = require("express");
-const bodyParser = require("body-parser");
 const app = express();
-const port = 3001;
+const port = 3000;
 
-// Configuring mongoose
-const mongoose = require("mongoose");
-mongoose.connect(
-  "mongodb+srv://kadson:a7x@cluster0.mmdhgv2.mongodb.net/?retryWrites=true&w=majority"
-);
-const db = mongoose.connection;
+app.use(express.json());
 
-// Setting mongoose up for errors and initial start
-db.on("error", (error) => console.error(error));
-db.once("open", () => console.log("Connected to database 'images'"));
-
-app.use(bodyParser.urlencoded({ extended: false }));
+app.get("/", (req, res) => {
+  res.json("Oi Beto");
+});
 
 app.listen(port, () => {
   console.log(`Deploy application running on port ${port}`);
 });
-
-const imagesRouter = require("./routes/images");
-app.use("/images", imagesRouter);
