@@ -2,33 +2,19 @@
 import express from "express";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
+import cors from "cors";
+import aws from "aws-sdk";
+import multer from "multer";
+import fs from "fs";
 
 // Configuring dotenv lib
 dotenv.config();
 
 // Configuring AWS lib
-import aws from "aws-sdk";
-import multer from "multer";
-import multerS3 from "multer-s3";
-
-aws.config.update({
-  secretAccessKey: process.env.ACCESS_SECRET,
-  accessKeyId: process.env.ACCESS_KEY,
+const s3 = new aws.S3({
   region: process.env.REGION,
-});
-const BUCKET = process.env.BUCKET;
-const s3 = new aws.S3();
-
-const upload = multer({
-  storage: multerS3({
-    s3: s3,
-    acl: "public-read",
-    bucket: BUCKET,
-    key: function (req, file, cb) {
-      console.log(file);
-      cb(null, file.originalname);
-    },
-  }),
+  accessKeyId: process.env.ACCESS_KEY,
+  secretAccessKey: process.env.ACCESS_SECRET,
 });
 
 // Configuring express
@@ -57,14 +43,29 @@ const Images = db.model("Image", imagesSchema);
 db.on("error", (error) => console.error(error));
 db.once("open", () => console.log("Connected to database"));
 
+// instancianting multer
+const upload = multer({ dest: "../deploy-app-front/images" });
+
 // Configuring body-parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cors());
 
 app.post("/api/upload", upload.single("imageUrl"), async (req, res) => {
+  const imagePath = req.file.path;
+  const blob = fs.readFileSync(imagePath);
+
+  await s3
+    .putObject({
+      Body: blob,
+      Bucket: process.env.BUCKET,
+      Key: req.file.originalname,
+    })
+    .promise();
+
   const image = new Images({
     title: req.body.title,
-    imageUrl: req.body.imageUrl,
+    imageUrl: req.file.originalname,
   });
 
   try {
@@ -77,13 +78,26 @@ app.post("/api/upload", upload.single("imageUrl"), async (req, res) => {
 
 app.get("/api/images", async (req, res) => {
   try {
-    // Get image files from s3 bucket
-    const response = await s3.listObjectsV2({ Bucket: BUCKET }).promise();
-    const imageFiles = response.Contents.map((item) => item.Key);
-
-    // Sending objects to user
     const images = await Images.find();
-    res.json({ bdObjects: images, files: imageFiles });
+
+    const imagesKey = images.map((imageObj) => imageObj.imageUrl);
+
+    const getObjectPromises = imagesKey.map((key) => {
+      const params = {
+        Bucket: process.env.BUCKET,
+        Key: key,
+      };
+
+      return s3.getSignedUrl("getObject", params);
+    });
+
+    const awsRealImages = [];
+    Promise.all(getObjectPromises).then((results) => {
+      results.forEach((data) => {
+        awsRealImages.push(data);
+      });
+      res.send({ bdObjects: images, awsRealImages });
+    });
   } catch (err) {
     res.status(500).json({ message: err });
   }
