@@ -6,6 +6,53 @@ import cors from "cors";
 import aws from "aws-sdk";
 import multer from "multer";
 import fs from "fs";
+import {
+  SQSClient,
+  SendMessageCommand,
+  ReceiveMessageCommand,
+} from "@aws-sdk/client-sqs";
+
+// Configuring SQS Client and setting up function to send messages
+const sqsClient = new SQSClient({
+  region: process.env.REGION,
+  accessKeyId: process.env.ACCESS_KEY,
+  secretAccessKey: process.env.ACCESS_SECRET,
+});
+
+const queueUrl = process.env.SQS_URL;
+
+const sendMessageToQueue = async (body, stringValue) => {
+  try {
+    const command = new SendMessageCommand({
+      MessageBody: body,
+      QueueUrl: queueUrl,
+      MessageAttributes: {
+        OrderId: { DataType: "String", StringValue: stringValue },
+      },
+    });
+
+    const result = await sqsClient.send(command);
+    return result;
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+const pollMessagesFromQueue = async () => {
+  try {
+    const command = new ReceiveMessageCommand({
+      MaxNumberOfMessages: 10,
+      QueueUrl: process.env.SQS_URL,
+      WaitTimeSeconds: 5,
+      MessageAttributeNames: ["All"],
+    });
+
+    const result = await sqsClient.send(command);
+    return result;
+  } catch (error) {
+    console.error(error);
+  }
+};
 
 // Configuring dotenv lib
 dotenv.config();
@@ -22,7 +69,7 @@ const app = express();
 const port = 3000;
 
 // Configuring mongoose
-// Creating images Schema
+// Creating Schemas
 const imagesSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -34,10 +81,22 @@ const imagesSchema = new mongoose.Schema({
   },
 });
 
-// Connecting to DB and instanciating images model
+const messagesSchema = new mongoose.Schema({
+  message: {
+    type: String,
+    required: true,
+  },
+  stringValue: {
+    type: String,
+    required: true,
+  },
+});
+
+// Connecting to DB and instanciating models
 mongoose.connect(process.env.MONGODB_URL);
 const db = mongoose.connection;
 const Images = db.model("Image", imagesSchema);
+const Messages = db.model("Message", messagesSchema);
 
 // Seeing if there's any error on connection
 db.on("error", (error) => console.error(error));
@@ -76,6 +135,23 @@ app.post("/api/upload", upload.single("imageUrl"), async (req, res) => {
   }
 });
 
+app.post("/api/send-message", async (req, res) => {
+  try {
+    const message = await sendMessageToQueue(
+      req.body.message,
+      req.body.stringValue
+    );
+    const dbMessage = new Messages({
+      title: req.body.message,
+      imageUrl: req.file.stringValue,
+    });
+    const newDbMessage = await dbMessage.save();
+    res.status(201).json({ db: newDbMessage, queueMessage: message });
+  } catch (error) {
+    res.status(400).json({ message: error });
+  }
+});
+
 app.get("/api/images", async (req, res) => {
   try {
     const images = await Images.find();
@@ -101,6 +177,11 @@ app.get("/api/images", async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err });
   }
+});
+
+app.get("/api/get-messages", async (req, res) => {
+  const messagesFromQueue = await pollMessagesFromQueue();
+  res.json(messagesFromQueue);
 });
 
 app.listen(port, () => {
