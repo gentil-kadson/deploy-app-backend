@@ -6,33 +6,33 @@ import cors from "cors";
 import aws from "aws-sdk";
 import multer from "multer";
 import fs from "fs";
-import {
-  SQSClient,
-  SendMessageCommand,
-  ReceiveMessageCommand,
-} from "@aws-sdk/client-sqs";
 
-// Configuring SQS Client and setting up function to send messages
-const sqsClient = new SQSClient({
+// Configuring dotenv lib
+dotenv.config();
+
+// AWS things
+aws.config.update({
   region: process.env.REGION,
-  accessKeyId: process.env.ACCESS_KEY,
-  secretAccessKey: process.env.ACCESS_SECRET,
+  credentials: {
+    accessKeyId: process.env.ACCESS_KEY,
+    secretAccessKey: process.env.ACCESS_SECRET,
+  },
 });
 
-const queueUrl = process.env.SQS_URL;
+const s3 = new aws.S3();
 
-const sendMessageToQueue = async (body, stringValue) => {
+const sqsClient = new aws.SQS();
+
+const sendMessageToQueue = async (body) => {
   try {
-    const command = new SendMessageCommand({
-      MessageBody: body,
-      QueueUrl: queueUrl,
-      MessageAttributes: {
-        OrderId: { DataType: "String", StringValue: stringValue },
-      },
-    });
-
-    const result = await sqsClient.send(command);
-    return result;
+    return await sqsClient
+      .sendMessage({
+        MessageBody: body,
+        QueueUrl: process.env.SQS_URL,
+        MessageGroupId: "mensagemDeploy",
+        MessageDeduplicationId: "amoJS",
+      })
+      .promise();
   } catch (error) {
     console.error(error);
   }
@@ -40,29 +40,18 @@ const sendMessageToQueue = async (body, stringValue) => {
 
 const pollMessagesFromQueue = async () => {
   try {
-    const command = new ReceiveMessageCommand({
-      MaxNumberOfMessages: 10,
-      QueueUrl: process.env.SQS_URL,
-      WaitTimeSeconds: 5,
-      MessageAttributeNames: ["All"],
-    });
-
-    const result = await sqsClient.send(command);
-    return result;
+    return await sqsClient
+      .receiveMessage({
+        QueueUrl: process.env.SQS_URL,
+        WaitTimeSeconds: 5,
+        MaxNumberOfMessages: 10,
+        MessageAttributeNames: ["All"],
+      })
+      .promise();
   } catch (error) {
     console.error(error);
   }
 };
-
-// Configuring dotenv lib
-dotenv.config();
-
-// Configuring AWS lib
-const s3 = new aws.S3({
-  region: process.env.REGION,
-  accessKeyId: process.env.ACCESS_KEY,
-  secretAccessKey: process.env.ACCESS_SECRET,
-});
 
 // Configuring express
 const app = express();
@@ -86,10 +75,6 @@ const messagesSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  stringValue: {
-    type: String,
-    required: true,
-  },
 });
 
 // Connecting to DB and instanciating models
@@ -103,7 +88,7 @@ db.on("error", (error) => console.error(error));
 db.once("open", () => console.log("Connected to database"));
 
 // instancianting multer
-const upload = multer({ dest: "../deploy-app-front/images" });
+const upload = multer({ dest: "./" });
 
 // Configuring body-parser
 app.use(express.json());
@@ -136,17 +121,14 @@ app.post("/api/upload", upload.single("imageUrl"), async (req, res) => {
 });
 
 app.post("/api/send-message", async (req, res) => {
+  const messageFromForm = req.body.message;
+  await sendMessageToQueue(messageFromForm);
   try {
-    const message = await sendMessageToQueue(
-      req.body.message,
-      req.body.stringValue
-    );
     const dbMessage = new Messages({
-      title: req.body.message,
-      imageUrl: req.file.stringValue,
+      message: messageFromForm,
     });
     const newDbMessage = await dbMessage.save();
-    res.status(201).json({ db: newDbMessage, queueMessage: message });
+    res.status(201).json(newDbMessage);
   } catch (error) {
     res.status(400).json({ message: error });
   }
@@ -181,7 +163,7 @@ app.get("/api/images", async (req, res) => {
 
 app.get("/api/get-messages", async (req, res) => {
   const messagesFromQueue = await pollMessagesFromQueue();
-  res.json(messagesFromQueue);
+  res.send(messagesFromQueue);
 });
 
 app.listen(port, () => {
